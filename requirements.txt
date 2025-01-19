@@ -1,0 +1,7 @@
+# file: requirements.txt
+gdown==4.7.1
+tensorflow==2.16.1
+torch==2.3.0
+torchvision==0.18.0
+scikit-image==0.22.0
+scikit-learn==1.4.2
