@@ -1,9 +1,3 @@
-# file: test_compatibility.py
-"""
-This script computes the compatibility score of each outfit, by processing each
-outfit as an independent graph.
-"""
-
 import json
 import tensorflow as tf
 import argparse
@@ -30,7 +24,7 @@ def test_compatibility(args):
     load_from = args.load_from
     config_file = os.path.join(load_from, "results.json")
     log_file = os.path.join(load_from, "log.json")
-    checkpoint_path = os.path.join(load_from, "best_epoch")
+    checkpoint_path = os.path.join(load_from, "best_epoch.weights.h5")
 
     with open(config_file) as f:
         config = json.load(f)
@@ -39,6 +33,7 @@ def test_compatibility(args):
 
     # Dataloader
     DATASET = config["dataset"]
+    print("initializing dataloader...")
     if DATASET == "polyvore":
         dl = DataLoaderPolyvore()
     elif DATASET == "fashiongen":
@@ -48,7 +43,8 @@ def test_compatibility(args):
 
     train_features, _, _, _, _ = dl.get_phase("train")
     _, adj_val, val_labels, val_r_indices, val_c_indices = dl.get_phase("valid")
-    test_features, _, _, _, _ = dl.get_phase("test")
+    # FIX 1: Capture adj_test
+    test_features, adj_test, _, _, _ = dl.get_phase("test")
     dl.setup_test_compatibility(resampled=args.resampled)
 
     BN_AS_TRAIN = False
@@ -66,6 +62,14 @@ def test_compatibility(args):
     for i in range(1, len(val_support)):
         val_support[i] = norm_adj(val_support[i])
 
+    # FIX 2: Create a test_support with the correct dimensions from adj_test
+    print(f"Computing adj matrices up to {config['degree']}th degree")
+    test_support = get_degree_supports(
+        adj_test, config["degree"], adj_self_con=ADJ_SELF_CONNECTIONS
+    )
+    for i in range(1, len(test_support)):
+        test_support[i] = norm_adj(test_support[i])
+
     num_support = len(val_support)
 
     model = CompatibilityGAE(
@@ -76,18 +80,18 @@ def test_compatibility(args):
         dropout_rate=0.0,
     )
 
-    # Build the model by calling it with placeholder shapes
+    # FIX 3: Use test_support to build the model with correct shapes
     _ = model(
         {
             "node_features": tf.convert_to_tensor(test_features, dtype=tf.float32),
-            "support": [to_tf_sparse_tensor(s) for s in val_support],
+            "support": [to_tf_sparse_tensor(s) for s in test_support],
             "row_indices": tf.convert_to_tensor(val_r_indices, dtype=tf.int32),
             "col_indices": tf.convert_to_tensor(val_c_indices, dtype=tf.int32),
         },
         training=False,
     )
 
-    model.load_weights(checkpoint_path).expect_partial()
+    model.load_weights(checkpoint_path)
     print("Model weights restored from:", checkpoint_path)
 
     loss_fn = tf.keras.losses.BinaryCrossentropy(from_logits=True)
@@ -100,7 +104,7 @@ def test_compatibility(args):
     def eval_model():
         val_inputs = {
             "node_features": tf.convert_to_tensor(
-                dl.normalize_features(dl.val_features, mean=mean, std=std),
+                dl.normalize_features(dl.valid_features, mean=mean, std=std),
                 dtype=tf.float32,
             ),
             "support": [to_tf_sparse_tensor(s) for s in val_support],
@@ -113,7 +117,7 @@ def test_compatibility(args):
         val_loss = loss_fn(val_labels_tensor, val_preds)
         val_acc_metric.update_state(val_labels_tensor, val_preds)
         val_acc = val_acc_metric.result().numpy()
-        val_acc_metric.reset_states()
+        val_acc_metric.reset_state()
 
         print(
             "val_loss=",

@@ -4,6 +4,7 @@ import tensorflow as tf
 import numpy as np
 import os
 import json
+import shutil  # Added import
 
 from utils import (
     get_degree_supports,
@@ -67,6 +68,15 @@ ap.add_argument(
     default="checkpoints/",
     help="Directory for saving model checkpoints",
 )
+# --- ADDED ARGUMENT FOR RESUMING ---
+ap.add_argument(
+    "-r",
+    "--resume",
+    type=str,
+    default=None,
+    help="Path to the weights file to resume training from.",
+)
+# ------------------------------------
 ap.add_argument(
     "-sup_do",
     "--support_dropout",
@@ -119,6 +129,7 @@ CHECKPOINTDIR = args["checkpoint_dir"]
 DEGREE = args["degree"]
 BATCH_NORM = args["batch_norm"]
 SUP_DO = args["support_dropout"]
+RESUME_PATH = args["resume"]  # Get the resume path
 ADJ_SELF_CONNECTIONS = True
 VERBOSE = True
 
@@ -192,6 +203,17 @@ model = CompatibilityGAE(
     batch_norm=BATCH_NORM,
     dropout_rate=DO,
 )
+
+# --- ADDED LOGIC TO LOAD WEIGHTS ---
+if RESUME_PATH:
+    if os.path.exists(RESUME_PATH):
+        print(f"\n--- Resuming training from checkpoint: {RESUME_PATH} ---\n")
+        model.load_weights(RESUME_PATH)
+    else:
+        print(
+            f"\n--- WARNING: Checkpoint file not found at '{RESUME_PATH}'. Starting from scratch. ---\n"
+        )
+# ------------------------------------
 
 optimizer = tf.keras.optimizers.Adam(learning_rate=LR)
 loss_fn = tf.keras.losses.BinaryCrossentropy(from_logits=True)
@@ -290,17 +312,17 @@ for epoch in range(NB_EPOCH):
     if val_acc > best_val_score:
         best_val_score = val_acc
         best_epoch = epoch
-        model.save_weights(os.path.join(CHECKPOINTDIR, "best_epoch"))
+        model.save_weights(os.path.join(CHECKPOINTDIR, "best_epoch.weights.h5"))
 
     # Reset metrics at the end of each epoch
-    train_acc_metric.reset_states()
-    val_acc_metric.reset_states()
+    train_acc_metric.reset_state()
+    val_acc_metric.reset_state()
 
 print("\nOptimization Finished!")
 print(f"Best validation score = {best_val_score:.5f} at epoch {best_epoch}")
 
 # Save final model
-model.save_weights(os.path.join(CHECKPOINTDIR, "final_model"))
+model.save_weights(os.path.join(CHECKPOINTDIR, "final_model.weights.h5"))
 
 # Store results
 results = args.copy()
@@ -313,10 +335,8 @@ with open(json_outfile, "w") as outfile:
 
 # Also copy to summaries dir for compatibility with test scripts
 shutil.copy(json_outfile, SUMMARIESDIR)
-if os.path.exists(os.path.join(CHECKPOINTDIR, "best_epoch.index")):
-    for f in os.listdir(CHECKPOINTDIR):
-        if f.startswith("best_epoch"):
-            shutil.copy(os.path.join(CHECKPOINTDIR, f), SUMMARIESDIR)
+if os.path.exists(os.path.join(CHECKPOINTDIR, "best_epoch.weights.h5")):
+    shutil.copy(os.path.join(CHECKPOINTDIR, "best_epoch.weights.h5"), SUMMARIESDIR)
 
 
 print("\nFinal results saved to:", json_outfile)

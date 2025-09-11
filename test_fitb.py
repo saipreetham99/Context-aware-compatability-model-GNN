@@ -22,7 +22,7 @@ def test_fitb(args):
     load_from = args.load_from
     config_file = os.path.join(load_from, "results.json")
     log_file = os.path.join(load_from, "log.json")
-    checkpoint_path = os.path.join(load_from, "best_epoch")
+    checkpoint_path = os.path.join(load_from, "best_epoch.weights.h5")
 
     with open(config_file) as f:
         config = json.load(f)
@@ -81,7 +81,7 @@ def test_fitb(args):
         training=False,
     )
 
-    model.load_weights(checkpoint_path).expect_partial()
+    model.load_weights(checkpoint_path)
     print("Model weights restored from:", checkpoint_path)
 
     loss_fn = tf.keras.losses.BinaryCrossentropy(from_logits=True)
@@ -100,7 +100,7 @@ def test_fitb(args):
     val_loss = loss_fn(val_labels_tensor, val_preds)
     acc_metric.update_state(val_labels_tensor, val_preds)
     val_acc = acc_metric.result().numpy()
-    acc_metric.reset_states()
+    acc_metric.reset_state()
 
     print(
         "val_loss=",
